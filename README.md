@@ -195,6 +195,65 @@ An interface will appear showing results as they load, letting you track the age
   <img src="assets/cli/cli_transaction.png" width="100%" style="display: inline-block; margin: 0 2%;">
 </p>
 
+## Web UI
+
+TradingAgents provides a Vue 3 web frontend with a real-time three-panel layout that mirrors the CLI experience. It connects to a FastAPI WebSocket server embedded in the project.
+
+### Architecture
+
+```
+[tradingagents_web/ Vue 3 SPA] <--WebSocket--> [tradingagents/web_api/ FastAPI] --calls--> [TradingAgents Graph]
+```
+
+- **Backend** (`tradingagents/web_api/`) — FastAPI server that runs the graph in a background thread and streams typed events over WebSocket (agent status, messages, tool calls, report sections, stats).
+- **Frontend** (`tradingagents_web/`) — Standalone Vue 3 SPA with three resizable panels, dark theme, and extensible panel registry.
+
+### Three-Panel Layout
+
+| Panel | Content |
+|---|---|
+| **Progress** (left) | Team/agent status table with live badges (pending / in_progress / completed / error) |
+| **Messages & Tools** (center) | Time-ordered message log with auto-scroll, type-colored entries, and tool call details |
+| **Current Report** (right) | Rendered Markdown report that updates as analysts complete |
+
+A **Status Bar** at the bottom tracks LLM calls, tool calls, token usage, completed reports, and elapsed time.
+
+### Usage
+
+Start the API server:
+
+```bash
+python -m uvicorn tradingagents.web_api.server:app
+```
+
+In another terminal, start the frontend dev server:
+
+```bash
+cd tradingagents_web
+npm install
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173) in your browser. The frontend auto-connects to the WebSocket backend and waits for analysis configuration (coming soon: a config wizard for ticker, analysts, LLM provider, etc.).
+
+### Extending
+
+New panels can be registered via `src/panels/registry.ts`:
+
+```typescript
+import { registerPanel } from '../panels/registry'
+import MyPanel from './MyPanel.vue'
+
+registerPanel({
+  id: 'my-panel',
+  title: 'My Custom View',
+  component: MyPanel,
+  defaultPosition: 'right',
+})
+```
+
+The `useEventBus` composable provides a pub/sub channel for panels to react to analysis events without affecting existing components.
+
 ## TradingAgents Package
 
 ### Implementation Details

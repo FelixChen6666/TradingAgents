@@ -26,6 +26,19 @@ from tradingagents.agents.utils.news_data_tools import (
 from tradingagents.agents.utils.market_data_validation_tools import (
     get_verified_market_snapshot
 )
+from tradingagents.agents.utils.macroeconomic_tools import (
+    get_economic_indicators,
+    get_fred_data,
+)
+from tradingagents.agents.utils.options_tools import (
+    get_options_chain,
+)
+from tradingagents.agents.utils.china_news_tools import (
+    get_china_macro_news,
+    get_china_policy_news,
+    get_china_global_market_news,
+    get_china_market_flow,
+)
 
 logger = logging.getLogger(__name__)
 

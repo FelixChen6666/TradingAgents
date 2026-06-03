@@ -38,7 +38,15 @@ from tradingagents.agents.utils.agent_utils import (
     get_income_statement,
     get_news,
     get_insider_transactions,
-    get_global_news
+    get_global_news,
+    get_economic_indicators,
+    get_fred_data,
+    get_options_chain,
+    get_verified_market_snapshot,
+    get_china_macro_news,
+    get_china_policy_news,
+    get_china_global_market_news,
+    get_china_market_flow,
 )
 
 from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, thread_id
@@ -173,6 +181,13 @@ class TradingAgentsGraph:
                     get_stock_data,
                     # Technical indicators
                     get_indicators,
+                    # Market data validation (ground-truth snapshot)
+                    get_verified_market_snapshot,
+                    # Macroeconomic data
+                    get_economic_indicators,
+                    get_fred_data,
+                    # Options chain data
+                    get_options_chain,
                 ]
             ),
             "social": ToolNode(
@@ -187,6 +202,11 @@ class TradingAgentsGraph:
                     get_news,
                     get_global_news,
                     get_insider_transactions,
+                    # China 4-layer news tools
+                    get_china_macro_news,
+                    get_china_policy_news,
+                    get_china_global_market_news,
+                    get_china_market_flow,
                 ]
             ),
             "fundamentals": ToolNode(
@@ -313,7 +333,8 @@ class TradingAgentsGraph:
         identity = resolve_instrument_identity(ticker)
         return build_instrument_context(ticker, asset_type, identity)
 
-    def propagate(self, company_name, trade_date, asset_type: str = "stock"):
+    def propagate(self, company_name, trade_date, asset_type: str = "stock",
+                  current_position: str = ""):
         """Run the trading agents graph for a company on a specific date.
 
         ``asset_type`` selects between the stock pipeline (default) and the
@@ -322,6 +343,9 @@ class TradingAgentsGraph:
         ``checkpoint_enabled`` is set in config, the graph is recompiled with
         a per-ticker SqliteSaver so a crashed run can resume from the last
         successful node on a subsequent invocation with the same ticker+date.
+
+        ``current_position`` is an optional description of the user's current
+        holdings (e.g. "Not holding" or "Holding 100 shares at $150 avg cost").
         """
         self.ticker = company_name
 
@@ -347,14 +371,16 @@ class TradingAgentsGraph:
                 logger.info("Starting fresh for %s on %s", company_name, trade_date)
 
         try:
-            return self._run_graph(company_name, trade_date, asset_type=asset_type)
+            return self._run_graph(company_name, trade_date, asset_type=asset_type,
+                                   current_position=current_position)
         finally:
             if self._checkpointer_ctx is not None:
                 self._checkpointer_ctx.__exit__(None, None, None)
                 self._checkpointer_ctx = None
                 self.graph = self.workflow.compile()
 
-    def _run_graph(self, company_name, trade_date, asset_type: str = "stock"):
+    def _run_graph(self, company_name, trade_date, asset_type: str = "stock",
+                   current_position: str = ""):
         """Execute the graph and write the resulting state to disk and memory log."""
         # Initialize state — inject memory log context for PM and the
         # deterministically resolved instrument identity for all agents.
@@ -366,6 +392,7 @@ class TradingAgentsGraph:
             asset_type=asset_type,
             past_context=past_context,
             instrument_context=instrument_context,
+            current_position=current_position,
         )
         args = self.propagator.get_graph_args()
 

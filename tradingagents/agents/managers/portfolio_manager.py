@@ -39,6 +39,13 @@ def create_portfolio_manager(llm):
             else ""
         )
 
+        current_position = state.get("current_position", "")
+        position_line = (
+            f"- User's current position: {current_position}\n"
+            if current_position
+            else ""
+        )
+
         prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
 
 {instrument_context}
@@ -52,16 +59,24 @@ def create_portfolio_manager(llm):
 - **Underweight**: Reduce exposure, take partial profits
 - **Sell**: Exit position or avoid entry
 
+**Holding Action Guidance** (recommend based on rating + current position):
+- 开仓买入 (open new position): when not holding and rating is Buy/Overweight
+- 加仓 (add to position): when holding and rating is Buy/Overweight
+- 持有不动 (hold steady): when holding and rating is Hold
+- 减仓 (reduce): when holding and rating is Underweight
+- 清仓卖出 (close position): when holding and rating is Sell
+- 观望等待 (wait and watch): when not holding and rating is Hold/Underweight/Sell
+
 **Context:**
 - Research Manager's investment plan: **{research_plan}**
 - Trader's transaction proposal: **{trader_plan}**
-{lessons_line}
+{lessons_line}{position_line}
 **Risk Analysts Debate History:**
 {history}
 
 ---
 
-Be decisive and ground every conclusion in specific evidence from the analysts.{get_language_instruction()}"""
+Ground every conclusion in specific evidence from the analysts. Consider the user's current position when recommending a holding action.{get_language_instruction()}"""
 
         final_trade_decision = invoke_structured_or_freetext(
             structured_llm,

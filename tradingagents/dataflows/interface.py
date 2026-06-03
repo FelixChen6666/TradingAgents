@@ -1,46 +1,113 @@
+"""Vendor routing engine — dispatches data method calls to the right provider.
+
+``route_to_vendor()`` is the single entry point that agent tools call.
+Vendors are discovered via the :mod:`~.registry` module; adding a new data
+source means writing a module that calls ``register_vendor()`` — no other
+file needs to change.
+"""
+
 from typing import Annotated
 
-# Import from vendor-specific modules
-from .y_finance import (
-    get_YFin_data_online,
-    get_stock_stats_indicators_window,
-    get_fundamentals as get_yfinance_fundamentals,
-    get_balance_sheet as get_yfinance_balance_sheet,
-    get_cashflow as get_yfinance_cashflow,
-    get_income_statement as get_yfinance_income_statement,
-    get_insider_transactions as get_yfinance_insider_transactions,
-)
-from .yfinance_news import get_news_yfinance, get_global_news_yfinance
-from .alpha_vantage import (
-    get_stock as get_alpha_vantage_stock,
-    get_indicator as get_alpha_vantage_indicator,
-    get_fundamentals as get_alpha_vantage_fundamentals,
-    get_balance_sheet as get_alpha_vantage_balance_sheet,
-    get_cashflow as get_alpha_vantage_cashflow,
-    get_income_statement as get_alpha_vantage_income_statement,
-    get_insider_transactions as get_alpha_vantage_insider_transactions,
-    get_news as get_alpha_vantage_news,
-    get_global_news as get_alpha_vantage_global_news,
-)
+# Import from vendor-specific modules to trigger self-registration.
+from . import alpha_vantage  # noqa: F401
+from . import y_finance  # noqa: F401
+from . import yfinance_news  # noqa: F401
+from . import social_sentiment  # noqa: F401
+from . import chinese_sentiment  # noqa: F401 — imported separately so it
+                                 # registers *after* social_sentiment has
+                                 # created the TOOLS_CATEGORIES entry
+from . import eastmoney_news  # noqa: F401
+from . import sina_finance_news  # noqa: F401
+from . import fred  # noqa: F401
+from . import options_data  # noqa: F401
+from . import akshare_stock  # noqa: F401
+from . import china_macro_news  # noqa: F401
+from . import china_policy_news  # noqa: F401
+from . import china_global_market_news  # noqa: F401
+from . import china_market_flow  # noqa: F401
+
 from .alpha_vantage_common import AlphaVantageRateLimitError
+from .config import get_config
+from .registry import (
+    TOOLS_CATEGORIES,
+    VENDOR_LIST,
+    VENDOR_METHODS,
+    register_vendor,
+)
 from .symbol_utils import NoMarketDataError
 
-# Configuration and routing logic
-from .config import get_config
+# ---------------------------------------------------------------------------
+# Register the built-in vendors on the legacy inline schema so that existing
+# code continues to work unchanged.  New vendors self-register in their own
+# modules via ``register_vendor()``.
+# ---------------------------------------------------------------------------
+# core_stock_apis
+register_vendor("get_stock_data", "yfinance", y_finance.get_YFin_data_online)
+register_vendor("get_stock_data", "alpha_vantage", alpha_vantage.get_stock)
 
-# Tools organized by category
-TOOLS_CATEGORIES = {
+# technical_indicators
+register_vendor(
+    "get_indicators",
+    "yfinance",
+    y_finance.get_stock_stats_indicators_window,
+)
+register_vendor(
+    "get_indicators",
+    "alpha_vantage",
+    alpha_vantage.get_indicator,
+)
+
+# fundamental_data
+register_vendor("get_fundamentals", "yfinance", y_finance.get_fundamentals)
+register_vendor(
+    "get_fundamentals", "alpha_vantage", alpha_vantage.get_fundamentals
+)
+register_vendor("get_balance_sheet", "yfinance", y_finance.get_balance_sheet)
+register_vendor(
+    "get_balance_sheet", "alpha_vantage", alpha_vantage.get_balance_sheet
+)
+register_vendor("get_cashflow", "yfinance", y_finance.get_cashflow)
+register_vendor("get_cashflow", "alpha_vantage", alpha_vantage.get_cashflow)
+register_vendor(
+    "get_income_statement", "yfinance", y_finance.get_income_statement
+)
+register_vendor(
+    "get_income_statement",
+    "alpha_vantage",
+    alpha_vantage.get_income_statement,
+)
+
+# news_data
+register_vendor("get_news", "yfinance", yfinance_news.get_news_yfinance)
+register_vendor("get_news", "alpha_vantage", alpha_vantage.get_news)
+register_vendor(
+    "get_global_news", "yfinance", yfinance_news.get_global_news_yfinance
+)
+register_vendor(
+    "get_global_news", "alpha_vantage", alpha_vantage.get_global_news
+)
+register_vendor(
+    "get_insider_transactions",
+    "yfinance",
+    y_finance.get_insider_transactions,
+)
+register_vendor(
+    "get_insider_transactions",
+    "alpha_vantage",
+    alpha_vantage.get_insider_transactions,
+)
+
+# Ensure the existing *inline* categories are also present so that
+# ``get_category_for_method()`` works for methods registered above.
+_REFCAT = TOOLS_CATEGORIES
+for _cat, _info in {
     "core_stock_apis": {
         "description": "OHLCV stock price data",
-        "tools": [
-            "get_stock_data"
-        ]
+        "tools": ["get_stock_data"],
     },
     "technical_indicators": {
         "description": "Technical analysis indicators",
-        "tools": [
-            "get_indicators"
-        ]
+        "tools": ["get_indicators"],
     },
     "fundamental_data": {
         "description": "Company fundamentals",
@@ -48,8 +115,8 @@ TOOLS_CATEGORIES = {
             "get_fundamentals",
             "get_balance_sheet",
             "get_cashflow",
-            "get_income_statement"
-        ]
+            "get_income_statement",
+        ],
     },
     "news_data": {
         "description": "News and insider data",
@@ -57,58 +124,37 @@ TOOLS_CATEGORIES = {
             "get_news",
             "get_global_news",
             "get_insider_transactions",
-        ]
-    }
-}
+        ],
+    },
+    "china_macro_news": {
+        "description": "China macroeconomic news and indicator data",
+        "tools": ["get_china_macro_news"],
+    },
+    "china_policy_news": {
+        "description": "China policy and regulatory news",
+        "tools": ["get_china_policy_news"],
+    },
+    "china_global_market_news": {
+        "description": "A-share relevant global market and geopolitical news",
+        "tools": ["get_china_global_market_news"],
+    },
+    "china_market_flow": {
+        "description": "A-share market sentiment and capital flow statistics",
+        "tools": ["get_china_market_flow"],
+    },
+}.items():
+    if _cat not in _REFCAT:
+        _REFCAT[_cat] = _info
+    else:
+        # Vendor self-registration may have created the category with only a
+        # subset of tools (e.g. eastmoney registers "search_news" with
+        # category="news_data").  Merge in any missing tools so that methods
+        # registered inline (e.g. get_insider_transactions) are discoverable.
+        existing_tools = _REFCAT[_cat]["tools"]
+        for tool in _info["tools"]:
+            if tool not in existing_tools:
+                existing_tools.append(tool)
 
-VENDOR_LIST = [
-    "yfinance",
-    "alpha_vantage",
-]
-
-# Mapping of methods to their vendor-specific implementations
-VENDOR_METHODS = {
-    # core_stock_apis
-    "get_stock_data": {
-        "alpha_vantage": get_alpha_vantage_stock,
-        "yfinance": get_YFin_data_online,
-    },
-    # technical_indicators
-    "get_indicators": {
-        "alpha_vantage": get_alpha_vantage_indicator,
-        "yfinance": get_stock_stats_indicators_window,
-    },
-    # fundamental_data
-    "get_fundamentals": {
-        "alpha_vantage": get_alpha_vantage_fundamentals,
-        "yfinance": get_yfinance_fundamentals,
-    },
-    "get_balance_sheet": {
-        "alpha_vantage": get_alpha_vantage_balance_sheet,
-        "yfinance": get_yfinance_balance_sheet,
-    },
-    "get_cashflow": {
-        "alpha_vantage": get_alpha_vantage_cashflow,
-        "yfinance": get_yfinance_cashflow,
-    },
-    "get_income_statement": {
-        "alpha_vantage": get_alpha_vantage_income_statement,
-        "yfinance": get_yfinance_income_statement,
-    },
-    # news_data
-    "get_news": {
-        "alpha_vantage": get_alpha_vantage_news,
-        "yfinance": get_news_yfinance,
-    },
-    "get_global_news": {
-        "yfinance": get_global_news_yfinance,
-        "alpha_vantage": get_alpha_vantage_global_news,
-    },
-    "get_insider_transactions": {
-        "alpha_vantage": get_alpha_vantage_insider_transactions,
-        "yfinance": get_yfinance_insider_transactions,
-    },
-}
 
 def get_category_for_method(method: str) -> str:
     """Get the category that contains the specified method."""
@@ -116,6 +162,7 @@ def get_category_for_method(method: str) -> str:
         if method in info["tools"]:
             return category
     raise ValueError(f"Method '{method}' not found in any category")
+
 
 def get_vendor(category: str, method: str = None) -> str:
     """Get the configured vendor for a data category or specific tool method.
@@ -132,11 +179,12 @@ def get_vendor(category: str, method: str = None) -> str:
     # Fall back to category-level configuration
     return config.get("data_vendors", {}).get(category, "default")
 
+
 def route_to_vendor(method: str, *args, **kwargs):
     """Route method calls to appropriate vendor implementation with fallback support."""
     category = get_category_for_method(method)
     vendor_config = get_vendor(category, method)
-    primary_vendors = [v.strip() for v in vendor_config.split(',')]
+    primary_vendors = [v.strip() for v in vendor_config.split(",")]
 
     if method not in VENDOR_METHODS:
         raise ValueError(f"Method '{method}' not supported")
@@ -174,9 +222,6 @@ def route_to_vendor(method: str, *args, **kwargs):
             continue
 
     # If any vendor reported "no data", the symbol is genuinely unavailable.
-    # Return one explicit, instructive sentinel rather than a vendor-specific
-    # empty string, so the agent reports "unavailable" instead of inventing a
-    # value. This takes precedence over incidental fallback errors.
     if last_no_data is not None:
         sym = last_no_data.symbol
         canonical = last_no_data.canonical

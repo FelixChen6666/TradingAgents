@@ -1,0 +1,58 @@
+:root {
+  /* ── Backgrounds ──────────────────────────────────── */
+  --bg-primary: #1a1b23;
+  --bg-secondary: #22232e;
+  --bg-panel: #262735;
+  --bg-hover: #2e2f3e;
+  --bg-input: #1e1f2a;
+
+  /* ── Borders ──────────────────────────────────────── */
+  --border-color: #363749;
+  --border-subtle: #2e2f3e;
+
+  /* ── Text ─────────────────────────────────────────── */
+  --text-primary: #e0e0e0;
+  --text-secondary: #a0a0b0;
+  --text-dim: #707080;
+
+  /* ── Semantic colors ──────────────────────────────── */
+  --color-green: #4caf50;
+  --color-blue: #42a5f5;
+  --color-cyan: #26c6da;
+  --color-yellow: #ffca28;
+  --color-orange: #ffa726;
+  --color-red: #ef5350;
+  --color-purple: #ab47bc;
+
+  /* ── Panel styling ────────────────────────────────── */
+  --panel-radius: 6px;
+  --panel-padding: 12px;
+
+  /* ── Splitters ────────────────────────────────────── */
+  --splitter-width: 5px;
+  --splitter-color: #2a2b38;
+  --splitter-hover: #42a5f5;
+}
+
+/* ── Custom scrollbar ────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3a3b4e;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4a4b5e;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}

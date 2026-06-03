@@ -72,4 +72,5 @@ class AgentState(MessagesState):
         RiskDebateState, "Current state of the debate on evaluating risk"
     ]
     final_trade_decision: Annotated[str, "Final decision made by the Risk Analysts"]
+    current_position: Annotated[str, "User's current position in this instrument, e.g. 'Not holding' or 'Holding 100 shares at $150 avg cost'"]
     past_context: Annotated[str, "Memory log context injected at run start (same-ticker decisions + cross-ticker lessons)"]

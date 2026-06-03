@@ -129,3 +129,84 @@ def normalize_symbol(raw: str) -> str:
 def is_yahoo_safe(symbol: str) -> bool:
     """True when ``symbol`` only contains characters Yahoo symbols use."""
     return bool(symbol) and _YAHOO_SAFE.fullmatch(symbol) is not None
+
+
+# ---------------------------------------------------------------------------
+# Market-detection helpers (multi-vendor awareness)
+# ---------------------------------------------------------------------------
+
+# A-share exchanges: Shanghai (6xx, 9xx), Shenzhen (0xx, 2xx, 3xx)
+_SH_SE_CODES = frozenset({"600", "601", "603", "605", "688", "689", "900"})
+_SZ_SE_CODES = frozenset({"000", "001", "002", "003", "300", "301", "200"})
+
+
+def detect_market(symbol: str) -> str:
+    """Detect the market for a symbol, independent of Yahoo conventions.
+
+    Returns one of ``"a_share"``, ``"hk"``, ``"us"``, ``"crypto"``,
+    ``"forex"``, ``"index"``, ``"commodity"``, or ``"unknown"``.
+    """
+    if not isinstance(symbol, str) or not symbol.strip():
+        return "unknown"
+
+    s = symbol.strip().upper()
+
+    # Explicit exchange suffix tells the market directly.
+    if s.endswith(".SS") or s.endswith(".SH"):
+        return "a_share"
+    if s.endswith(".SZ"):
+        return "a_share"
+    if s.endswith(".HK"):
+        return "hk"
+
+    # Check alias table first (it contains definitive mappings).
+    if s in _ALIASES:
+        alias = _ALIASES[s]
+        if "=X" in alias:
+            return "forex"
+        if "-USD" in alias or "-BTC" in alias:
+            return "crypto"
+        if alias.startswith("^"):
+            return "index"
+        if alias.endswith("=F"):
+            return "commodity"
+        return "us"  # default alias target is US-listed
+
+    # Crypto pattern: 6-letter <BASE>USD
+    if len(s) == 6 and s[:3] in _CRYPTO_BASES and s[3:] == "USD":
+        return "crypto"
+    if len(s) > 3 and s[:-3] in _CRYPTO_BASES and s.endswith("USD"):
+        return "crypto"
+
+    # Forex pattern: 6-letter ISO currency pair
+    if len(s) == 6 and s[:3] in _FOREX_CURRENCIES and s[3:] in _FOREX_CURRENCIES:
+        return "forex"
+
+    # A-share: numeric codes that match Shanghai / Shenzhen prefixes.
+    if s.isdigit():
+        prefix = s[:3]
+        if prefix in _SH_SE_CODES:
+            return "a_share"
+        if prefix in _SZ_SE_CODES:
+            return "a_share"
+
+    # Hong Kong stocks: 5-digit numeric starting with 0 (ex. 00700).
+    if s.isdigit() and len(s) == 5:
+        return "hk"
+
+    # Fallback — treat as US-listed equity.
+    return "us"
+
+
+def is_a_share(symbol: str) -> bool:
+    """Shortcut — True if *symbol* is a China A-share."""
+    return detect_market(symbol) == "a_share"
+
+
+def strip_exchange_suffix(symbol: str) -> str:
+    """Remove trailing exchange suffix (.SS, .SH, .SZ, .HK) from *symbol*."""
+    s = symbol.strip().upper()
+    for suffix in (".SS", ".SH", ".SZ", ".HK", ".L", ".T", ".TO", ".AX", ".BO", ".NS"):
+        if s.endswith(suffix):
+            return s[: -len(suffix)]
+    return s

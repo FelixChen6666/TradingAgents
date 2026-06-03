@@ -168,6 +168,21 @@ def render_trader_proposal(proposal: TraderProposal) -> str:
 # ---------------------------------------------------------------------------
 
 
+class HoldingAction(str, Enum):
+    """Position-aware action recommendation based on analysis + current holdings.
+
+    Maps the analytical rating to a concrete action given whether the user
+    already holds the instrument and how large their position is.
+    """
+
+    OPEN_NEW = "开仓买入"
+    ADD_TO = "加仓"
+    HOLD = "持有不动"
+    REDUCE = "减仓"
+    CLOSE = "清仓卖出"
+    WAIT = "观望等待"
+
+
 class PortfolioDecision(BaseModel):
     """Structured output produced by the Portfolio Manager.
 
@@ -196,6 +211,27 @@ class PortfolioDecision(BaseModel):
             "incorporate them; otherwise rely solely on the current analysis."
         ),
     )
+    current_position_summary: Optional[str] = Field(
+        default=None,
+        description=(
+            "Summary of the user's current position in this instrument, "
+            "e.g. 'Not holding' or 'Holding 100 shares at $150 avg cost'. "
+            "Reflect what was provided; do not invent holdings."
+        ),
+    )
+    holding_action: Optional[str] = Field(
+        default=None,
+        description=(
+            "Concrete action recommendation informed by both the analysis "
+            "rating and the user's current position. Choose from: "
+            "开仓买入 (open new position when not holding + bullish), "
+            "加仓 (add to existing position when holding + bullish), "
+            "持有不动 (hold when holding + neutral/bullish), "
+            "减仓 (reduce when holding + bearish), "
+            "清仓卖出 (close entirely when holding + strongly bearish), "
+            "观望等待 (wait when not holding + neutral/bearish)."
+        ),
+    )
     price_target: Optional[float] = Field(
         default=None,
         description="Optional target price in the instrument's quote currency.",
@@ -221,6 +257,10 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
         "",
         f"**Investment Thesis**: {decision.investment_thesis}",
     ]
+    if decision.current_position_summary:
+        parts.extend(["", f"**Current Position**: {decision.current_position_summary}"])
+    if decision.holding_action:
+        parts.extend(["", f"**Holding Action**: {decision.holding_action}"])
     if decision.price_target is not None:
         parts.extend(["", f"**Price Target**: {decision.price_target}"])
     if decision.time_horizon:

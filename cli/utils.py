@@ -575,3 +575,169 @@ def ask_output_language() -> str:
         ).ask().strip()
 
     return choice
+
+
+# ---------------------------------------------------------------------------
+# Data vendor configuration
+# ---------------------------------------------------------------------------
+
+# Market presets: maps a user-facing choice to data_vendor overrides.
+# Keys match DEFAULT_CONFIG["data_vendors"]. Only categories whose vendor
+# differs from the system defaults need to be listed.
+_DATA_PRESETS: Dict[str, Dict[str, str]] = {
+    "preset_us": {
+        "label": "US Markets (Standard)",
+        "description": "Yahoo Finance for stock data, fundamentals, and news",
+        # All yfinance defaults — empty dict means no overrides
+        "overrides": {},
+    },
+    "preset_china": {
+        "label": "China A-Shares",
+        "description": "AKShare for OHLCV/fundamentals, East Money for news",
+        "overrides": {
+            "core_stock_apis": "akshare",
+            "fundamental_data": "akshare",
+            "news_data": "eastmoney",
+            "social_sentiment": "all",
+        },
+    },
+    "preset_hk": {
+        "label": "Hong Kong Stocks",
+        "description": "Yahoo Finance for OHLCV, Sina Finance for news",
+        "overrides": {
+            "news_data": "sina_finance",
+            "social_sentiment": "all",
+        },
+    },
+    "preset_global": {
+        "label": "Global / Diversified",
+        "description": "Yahoo Finance globally, East Money for China news coverage",
+        "overrides": {
+            "news_data": "eastmoney",
+            "social_sentiment": "all",
+        },
+    },
+    "custom": {
+        "label": "Custom — configure each category",
+        "description": "Individually pick vendors per data category",
+        "overrides": "__custom__",
+    },
+}
+
+
+def select_data_vendors(
+    asset_type: AssetType = AssetType.STOCK,
+) -> Dict[str, str]:
+    """Interactively configure data vendors per category.
+
+    Presents a preset picker first so most users just pick their market
+    and move on. Selecting "Custom" drops into per-category selects.
+
+    Returns:
+        A dict mapping category keys (e.g. ``"news_data"``) to the
+        chosen vendor name. Only non-default choices are included so the
+        caller can merge only what changed. Returns an empty dict when
+        the user keeps all defaults.
+    """
+    choices = []
+    for key, cfg in _DATA_PRESETS.items():
+        choices.append(
+            questionary.Choice(f"{cfg['label']} — {cfg['description']}", value=key)
+        )
+
+    profile = questionary.select(
+        "Select Data Vendor Profile:",
+        choices=choices,
+        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        style=questionary.Style([
+            ("selected", "fg:cyan noinherit"),
+            ("highlighted", "fg:cyan noinherit"),
+            ("pointer", "fg:cyan noinherit"),
+        ]),
+    ).ask()
+
+    if profile is None or profile == "preset_us":
+        return {}
+
+    if profile != "custom":
+        return _DATA_PRESETS[profile]["overrides"].copy()
+
+    # Custom: show per-category selects for multi-vendor categories
+    _CATEGORIES: Dict[str, Dict[str, str]] = {
+        "core_stock_apis": {
+            "label": "Stock Price Data (OHLCV)",
+            "options": {
+                "yfinance": "Yahoo Finance (default, no API key needed)",
+                "alpha_vantage": "Alpha Vantage (free API key required)",
+                "akshare": "AKShare (China markets, free)",
+            },
+            "default": "yfinance",
+        },
+        "technical_indicators": {
+            "label": "Technical Indicators (SMA, RSI, MACD…)",
+            "options": {
+                "yfinance": "Yahoo Finance (default, no API key needed)",
+                "alpha_vantage": "Alpha Vantage (free API key required)",
+            },
+            "default": "yfinance",
+        },
+        "fundamental_data": {
+            "label": "Fundamental Data (financial statements)",
+            "options": {
+                "yfinance": "Yahoo Finance (default, no API key needed)",
+                "alpha_vantage": "Alpha Vantage (free API key required)",
+                "akshare": "AKShare (China markets, free)",
+            },
+            "default": "yfinance",
+        },
+        "news_data": {
+            "label": "News & Insider Data",
+            "options": {
+                "yfinance": "Yahoo Finance (default, global, free)",
+                "eastmoney": "East Money (China A-shares, free)",
+                "sina_finance": "Sina Finance (China A-shares, free)",
+                "alpha_vantage": "Alpha Vantage (free API key required)",
+            },
+            "default": "yfinance",
+        },
+        "social_sentiment": {
+            "label": "Social Sentiment (StockTwits / Reddit / Chinese)",
+            "options": {
+                "all": "Both StockTwits + Reddit (default, global markets)",
+                "stocktwits": "StockTwits only",
+                "reddit": "Reddit only",
+                "chinese": "Chinese A-share (Baidu vote + East Money 千股千评, via AKShare)",
+                "baidu_vote": "Baidu stock vote only (看涨/看跌 ratio)",
+                "em_comment": "East Money 千股千评 only (综合评分)",
+            },
+            "default": "all",
+        },
+    }
+
+    selections: Dict[str, str] = {}
+    for cat_key, cat_info in _CATEGORIES.items():
+        choices = []
+        for vendor_key, vendor_label in cat_info["options"].items():
+            display = vendor_label
+            if vendor_key == cat_info["default"]:
+                display = f"{vendor_label}  (Default)"
+            choices.append(questionary.Choice(display, value=vendor_key))
+
+        chosen = questionary.select(
+            f"Select {cat_info['label']}:",
+            choices=choices,
+            instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+            style=questionary.Style([
+                ("selected", "fg:cyan noinherit"),
+                ("highlighted", "fg:cyan noinherit"),
+                ("pointer", "fg:cyan noinherit"),
+            ]),
+        ).ask()
+
+        if chosen is None:
+            continue
+
+        if chosen != cat_info["default"]:
+            selections[cat_key] = chosen
+
+    return selections

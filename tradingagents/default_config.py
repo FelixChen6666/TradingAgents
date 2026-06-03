@@ -95,18 +95,35 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "geopolitical risk trade war sanctions",
         "ECB Bank of England BOJ central bank policy",
         "oil commodities supply chain energy",
+        "US China trade tariff relations",
+        "China ADR Hong Kong stock market",
+        "emerging market Asia Pacific economy",
+        "commodity prices oil copper iron ore",
+        "yuan renminbi exchange rate policy",
     ],
     # Data vendor configuration
     # Category-level configuration (default for all tools in category)
     "data_vendors": {
-        "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance
-        "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
-        "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
-        "news_data": "yfinance",             # Options: alpha_vantage, yfinance
+        "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance, akshare
+        "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance, akshare
+        "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance, akshare
+        "news_data": "eastmoney,sina_finance,yfinance",  # Options: yfinance, alpha_vantage, eastmoney, sina_finance
+        "social_sentiment": "all",           # Options: stocktwits, reddit, all, chinese, baidu_vote, em_comment (no key needed)
+        "chinese_market_data": "akshare",    # China A-share / HK data (no key needed)
+        "macroeconomic_data": "fred",        # US macro indicators (free API key)
+        "china_macro_news": "akshare+eastmoney",
+        "china_policy_news": "eastmoney+sina",
+        "china_global_market_news": "eastmoney+yfinance",
+        "china_market_flow": "akshare",
     },
     # Tool-level configuration (takes precedence over category-level)
     "tool_vendors": {
         # Example: "get_stock_data": "alpha_vantage",  # Override category default
+    },
+    # API keys for optional data sources (all free tiers).
+    # Leave empty to skip the vendor — route_to_vendor() will fall through.
+    "api_keys": {
+        "fred": "",         # https://fred.stlouisfed.org (free registration)
     },
     # Benchmark for alpha calculation in the reflection layer.
     # ``benchmark_ticker`` (when set) overrides the suffix map for all

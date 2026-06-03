@@ -22,7 +22,7 @@ def create_research_manager(llm):
 
         investment_debate_state = state["investment_debate_state"]
 
-        prompt = f"""As the Research Manager and debate facilitator, your role is to critically evaluate this round of debate and deliver a clear, actionable investment plan for the trader.
+        prompt = f"""As the Research Manager and debate facilitator, your role is to evaluate the bull/bear debate and deliver an investment plan for the trader that reflects the weight of evidence from the discussion.
 
 {instrument_context}
 
@@ -35,7 +35,7 @@ def create_research_manager(llm):
 - **Underweight**: Cautious view; recommend trimming exposure
 - **Sell**: Strong conviction in the bear thesis; recommend exiting or avoiding the position
 
-Commit to a clear stance whenever the debate's strongest arguments warrant one; reserve Hold for situations where the evidence on both sides is genuinely balanced.
+Select the rating that best reflects the evidence from the debate. All five ratings are valid options depending on the data.
 
 ---
 
