@@ -22,8 +22,39 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Literal
+
+__all__ = [
+    # Errors
+    "NoMarketDataError",
+    "SymbolFormatError",
+    # Type aliases
+    "MarketName",
+    "AkshareMarket",
+    # Normalisation primitives
+    "normalize_symbol",
+    "is_yahoo_safe",
+    # Market detection
+    "detect_market",
+    "is_a_share",
+    "is_shanghai_a_share",
+    "is_shenzhen_a_share",
+    "get_akshare_market",
+    # Suffix / prefix handling
+    "strip_exchange_suffix",
+    "strip_prefix_market",
+    "get_pure_code",
+    "to_a_share_code",
+    # Vendor-specific formatters
+    "get_eastmoney_secid",
+    "get_sina_prefix",
+]
 
 logger = logging.getLogger(__name__)
+
+# Vendor routing return values (typed to catch typos at static-analysis time).
+MarketName = Literal["a_share", "hk", "us", "crypto", "forex", "index", "commodity", "unknown"]
+AkshareMarket = Literal["a_share", "hk", "unsupported"]
 
 
 class NoMarketDataError(Exception):
@@ -43,6 +74,29 @@ class NoMarketDataError(Exception):
             msg += f" (queried as {canonical!r})"
         if detail:
             msg += f": {detail}"
+        super().__init__(msg)
+
+
+class SymbolFormatError(ValueError):
+    """Raised when a symbol cannot be converted to a vendor format.
+
+    Carries the original user input plus an optional vendor tag so that
+    CLI layers can show a single, friendly message ("please enter a
+    6-digit A-share code") instead of a raw stack trace.
+
+    Attributes:
+        symbol: The original input that failed validation.
+        vendor: Optional vendor name (e.g. ``"eastmoney"``, ``"sina"``)
+            for richer error messages.
+    """
+
+    def __init__(self, symbol, vendor: str | None = None, detail: str = ""):
+        self.symbol = symbol
+        self.vendor = vendor
+        prefix = f"[{vendor}] " if vendor else ""
+        msg = f"{prefix}invalid symbol {symbol!r}"
+        if detail:
+            msg += f" ({detail})"
         super().__init__(msg)
 
 
@@ -140,7 +194,7 @@ _SH_SE_CODES = frozenset({"600", "601", "603", "605", "688", "689", "900"})
 _SZ_SE_CODES = frozenset({"000", "001", "002", "003", "300", "301", "200"})
 
 
-def detect_market(symbol: str) -> str:
+def detect_market(symbol: str) -> MarketName:
     """Detect the market for a symbol, independent of Yahoo conventions.
 
     Returns one of ``"a_share"``, ``"hk"``, ``"us"``, ``"crypto"``,
@@ -216,11 +270,62 @@ def strip_exchange_suffix(symbol: str) -> str:
 # Vendor-format conversion helpers (DRY: used by eastmoney, sina, akshare, ...)
 # ---------------------------------------------------------------------------
 
-# A-share market groups: Shanghai returns 1./sh, Shenzhen returns 0./sz.
-# This mirrors the existing _SH_SE_CODES / _SZ_SE_CODES detection in
-# detect_market() but is exposed as a set for direct prefix matching by
-# the vendor-specific formatters below.
-_SHANGHAI_CODE_PREFIXES = ("6", "9", "68")
+# Vendor formatters all share the same validation pipeline:
+#   1. normalise (strip prefix form + strip suffix form)
+#   2. ensure 6-digit numeric A-share code
+#   3. classify into Shanghai / Shenzhen via the canonical prefix tables
+#      below (_SH_SE_CODES / _SZ_SE_CODES are the single source of truth
+#      — extend them to add new A-share sub-markets like 北交所).
+#   4. render the vendor-specific representation.
+# _normalise_a_share() captures steps 1-3; the formatters only own step 4.
+
+
+def _normalise_a_share(symbol: str, vendor: str | None = None) -> tuple[str, str]:
+    """Normalise *symbol* and classify it as Shanghai / Shenzhen.
+
+    Performs steps 1-3 of the vendor pipeline.  Returns a
+    ``(code, market)`` tuple where ``code`` is a 6-digit string and
+    ``market`` is ``"sh"`` / ``"sz"``.
+
+    Raises:
+        SymbolFormatError: When *symbol* is not a recognised A-share code.
+    """
+    code = strip_exchange_suffix(strip_prefix_market(symbol))
+    if not code.isdigit() or len(code) != 6:
+        raise SymbolFormatError(
+            symbol, vendor=vendor,
+            detail=f"expected 6 digits, got {code!r}",
+        )
+    market = _classify_a_share_market(code)
+    if market is None:
+        raise SymbolFormatError(
+            symbol, vendor=vendor,
+            detail=f"code {code!r} does not match any known A-share exchange prefix",
+        )
+    return code, market
+
+
+def _classify_a_share_market(code: str) -> str | None:
+    """Return ``"sh"`` / ``"sz"`` for a 6-digit A-share code, else ``None``.
+
+    Validates against the canonical Shanghai/Shenzhen prefix tables so
+    that numbers like ``666666`` (not a real exchange code) are rejected
+    rather than silently misclassified.
+
+    Args:
+        code: A 6-digit numeric string (output of :func:`get_pure_code`).
+
+    Returns:
+        ``"sh"``, ``"sz"``, or ``None`` if the code is not a recognised
+        A-share prefix.
+    """
+    if not code.isdigit() or len(code) != 6:
+        return None
+    if code[:3] in _SH_SE_CODES:
+        return "sh"
+    if code[:3] in _SZ_SE_CODES:
+        return "sz"
+    return None
 
 
 def get_pure_code(symbol: str) -> str:
@@ -239,20 +344,12 @@ def get_pure_code(symbol: str) -> str:
 
 def is_shanghai_a_share(symbol: str) -> bool:
     """True if *symbol* is a Shanghai-listed A-share (incl. 科创板 / B股)."""
-    code = get_pure_code(symbol)
-    if not code.isdigit() or len(code) != 6:
-        return False
-    return code.startswith(_SHANGHAI_CODE_PREFIXES)
+    return _classify_a_share_market(get_pure_code(symbol)) == "sh"
 
 
 def is_shenzhen_a_share(symbol: str) -> bool:
     """True if *symbol* is a Shenzhen-listed A-share (incl. 创业板 / B股)."""
-    code = get_pure_code(symbol)
-    if not code.isdigit() or len(code) != 6:
-        return False
-    # After Shanghai check, any 6-digit A-share that isn't Shanghai is
-    # Shenzhen.  detect_market() already proved it's a_share.
-    return is_a_share(symbol) and not is_shanghai_a_share(symbol)
+    return _classify_a_share_market(get_pure_code(symbol)) == "sz"
 
 
 def get_eastmoney_secid(symbol: str) -> str:
@@ -263,22 +360,19 @@ def get_eastmoney_secid(symbol: str) -> str:
     the exchange (1 = Shanghai, 0 = Shenzhen).
 
     Args:
-        symbol: A-share code, with or without an exchange suffix
-            (e.g. ``"600519"``, ``"000001.SZ"``).
+        symbol: A-share code in any common form — pure digits
+            (``"600519"``), Yahoo suffix (``"600519.SH"``) or Chinese
+            retail prefix (``"SH600519"``).
 
     Returns:
         The secid string (e.g. ``"1.600519"`` or ``"0.000001"``).
 
     Raises:
-        ValueError: When *symbol* is not a 6-digit A-share code.
+        SymbolFormatError: When *symbol* is not a 6-digit A-share code.
+            The exception's ``vendor`` attribute is ``"eastmoney"``.
     """
-    code = get_pure_code(symbol)
-    if not code.isdigit() or len(code) != 6:
-        raise ValueError(
-            f"Invalid A-share code for East Money secid: {symbol!r}"
-        )
-    prefix = "1" if is_shanghai_a_share(code) else "0"
-    return f"{prefix}.{code}"
+    code, market = _normalise_a_share(symbol, vendor="eastmoney")
+    return f"1.{code}" if market == "sh" else f"0.{code}"
 
 
 def get_sina_prefix(symbol: str) -> str:
@@ -288,23 +382,21 @@ def get_sina_prefix(symbol: str) -> str:
     the form ``finance.sina.com.cn/realstock/company/sh600519/nc.shtml``).
 
     Args:
-        symbol: A-share code, with or without an exchange suffix.
+        symbol: A-share code in any common form (see
+            :func:`get_eastmoney_secid` for accepted inputs).
 
     Returns:
         The exchange prefix (``"sh"`` or ``"sz"``).
 
     Raises:
-        ValueError: When *symbol* is not a 6-digit A-share code.
+        SymbolFormatError: When *symbol* is not a 6-digit A-share code.
+            The exception's ``vendor`` attribute is ``"sina"``.
     """
-    code = get_pure_code(symbol)
-    if not code.isdigit() or len(code) != 6:
-        raise ValueError(
-            f"Invalid A-share code for Sina prefix: {symbol!r}"
-        )
-    return "sh" if is_shanghai_a_share(code) else "sz"
+    _code, market = _normalise_a_share(symbol, vendor="sina")
+    return market
 
 
-def get_akshare_market(symbol: str) -> str:
+def get_akshare_market(symbol: str) -> AkshareMarket:
     """Determine the AKShare market flavour for *symbol*.
 
     AKShare routes A-share and HK stock queries to different APIs, so

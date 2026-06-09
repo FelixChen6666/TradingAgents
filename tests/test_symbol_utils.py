@@ -6,6 +6,7 @@ import pytest
 
 from tradingagents.dataflows.symbol_utils import (
     NoMarketDataError,
+    SymbolFormatError,
     get_akshare_market,
     get_eastmoney_secid,
     get_pure_code,
@@ -112,10 +113,18 @@ class TestIsShanghaiShenzhenA(unittest.TestCase):
         for sym in ("600519", "600519.SH", "688001.SH", "900901"):
             self.assertTrue(is_shanghai_a_share(sym), sym)
         self.assertTrue(is_shanghai_a_share("688001"))  # 科创板
+        self.assertTrue(is_shanghai_a_share("601318"))  # 601xxx
+        self.assertTrue(is_shanghai_a_share("603259"))  # 603xxx
+        self.assertTrue(is_shanghai_a_share("605499"))  # 605xxx
+        self.assertTrue(is_shanghai_a_share("689009"))  # 689xxx 科创板扩展
 
     def test_shenzhen_codes(self):
         for sym in ("000001", "000001.SZ", "300001", "002001"):
             self.assertTrue(is_shenzhen_a_share(sym), sym)
+        self.assertTrue(is_shenzhen_a_share("001979"))  # 001xxx 中小板
+        self.assertTrue(is_shenzhen_a_share("003816"))  # 003xxx
+        self.assertTrue(is_shenzhen_a_share("301236"))  # 301xxx 创业板
+        self.assertTrue(is_shenzhen_a_share("200002"))  # 200xxx B股
 
     def test_not_a_share(self):
         self.assertFalse(is_shanghai_a_share("AAPL"))
@@ -123,51 +132,110 @@ class TestIsShanghaiShenzhenA(unittest.TestCase):
         self.assertFalse(is_shanghai_a_share("12345"))  # 5-digit (HK)
         self.assertFalse(is_shenzhen_a_share("12345"))
 
+    def test_bj_exchange_rejected(self):
+        # 北交所 8/4 开头不应被识别为 A 股
+        # (830001, 430047 等)
+        for sym in ("830001", "430047", "830001.BJ"):
+            self.assertFalse(is_a_share(sym), sym)
+            self.assertFalse(is_shanghai_a_share(sym), sym)
+            self.assertFalse(is_shenzhen_a_share(sym), sym)
+
+    def test_invalid_6digit_rejected(self):
+        # 不是真实 A 股段但 6 位数字的代码必须被拒
+        # (与原 eastmoney_news.py 用 startswith(("6","9","68")) 相比修复)
+        for sym in ("666666", "777777", "123456", "888888"):
+            self.assertFalse(is_a_share(sym), sym)
+            self.assertFalse(is_shanghai_a_share(sym), sym)
+            self.assertFalse(is_shenzhen_a_share(sym), sym)
+
     def test_shanghai_not_shenzhen(self):
         self.assertFalse(is_shenzhen_a_share("600519"))
         self.assertFalse(is_shanghai_a_share("000001"))
 
 
 @pytest.mark.unit
-class TestGetEastmoneySecid(unittest.TestCase):
-    def test_shanghai(self):
-        self.assertEqual(get_eastmoney_secid("600519"), "1.600519")
-        self.assertEqual(get_eastmoney_secid("600519.SH"), "1.600519")
-        self.assertEqual(get_eastmoney_secid("688001"), "1.688001")
-        self.assertEqual(get_eastmoney_secid("900901"), "1.900901")
-
-    def test_shenzhen(self):
-        self.assertEqual(get_eastmoney_secid("000001"), "0.000001")
-        self.assertEqual(get_eastmoney_secid("000001.SZ"), "0.000001")
-        self.assertEqual(get_eastmoney_secid("300001"), "0.300001")
-        self.assertEqual(get_eastmoney_secid("002001"), "0.002001")
-
-    def test_invalid_raises(self):
-        with self.assertRaises(ValueError):
-            get_eastmoney_secid("AAPL")
-        with self.assertRaises(ValueError):
-            get_eastmoney_secid("12345")
-        with self.assertRaises(ValueError):
-            get_eastmoney_secid("")
+@pytest.mark.parametrize(
+    "symbol,expected",
+    [
+        # Shanghai (secid prefix 1)
+        pytest.param("600519", "1.600519", id="sh-bare"),
+        pytest.param("600519.SH", "1.600519", id="sh-suffix"),
+        pytest.param("SH600519", "1.600519", id="sh-prefix-upper"),
+        pytest.param("sh600519", "1.600519", id="sh-prefix-lower"),
+        pytest.param("688001", "1.688001", id="sh-科创板"),
+        pytest.param("900901", "1.900901", id="sh-B股"),
+        # Shenzhen (secid prefix 0)
+        pytest.param("000001", "0.000001", id="sz-bare"),
+        pytest.param("000001.SZ", "0.000001", id="sz-suffix"),
+        pytest.param("SZ000001", "0.000001", id="sz-prefix"),
+        pytest.param("300001", "0.300001", id="sz-创业板"),
+        pytest.param("002001", "0.002001", id="sz-中小板"),
+    ],
+)
+def test_get_eastmoney_secid_valid(symbol, expected):
+    assert get_eastmoney_secid(symbol) == expected
 
 
 @pytest.mark.unit
-class TestGetSinaPrefix(unittest.TestCase):
-    def test_shanghai(self):
-        self.assertEqual(get_sina_prefix("600519"), "sh")
-        self.assertEqual(get_sina_prefix("600519.SH"), "sh")
-        self.assertEqual(get_sina_prefix("688001"), "sh")
+@pytest.mark.parametrize(
+    "symbol",
+    [
+        pytest.param("AAPL", id="us-equity"),
+        pytest.param("12345", id="hk-5digit"),
+        pytest.param("", id="empty"),
+        # 北交所必须被拒 (bug fix 回归)
+        pytest.param("830001", id="bj-8xx"),
+        pytest.param("430047", id="bj-4xx"),
+        pytest.param("830001.BJ", id="bj-suffix"),
+        pytest.param("BJ830001", id="bj-prefix"),
+        # 无效 6 位数字必须被拒 (bug fix 回归)
+        pytest.param("666666", id="invalid-666666"),
+        pytest.param("777777", id="invalid-777777"),
+        pytest.param("888888", id="invalid-888888"),
+        pytest.param("123456", id="invalid-123456"),
+    ],
+)
+def test_get_eastmoney_secid_rejects(symbol):
+    with pytest.raises(SymbolFormatError) as exc:
+        get_eastmoney_secid(symbol)
+    assert exc.value.vendor == "eastmoney"
+    assert exc.value.symbol == symbol
 
-    def test_shenzhen(self):
-        self.assertEqual(get_sina_prefix("000001"), "sz")
-        self.assertEqual(get_sina_prefix("000001.SZ"), "sz")
-        self.assertEqual(get_sina_prefix("300001"), "sz")
 
-    def test_invalid_raises(self):
-        with self.assertRaises(ValueError):
-            get_sina_prefix("AAPL")
-        with self.assertRaises(ValueError):
-            get_sina_prefix("12345")
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "symbol,expected",
+    [
+        pytest.param("600519", "sh", id="sh-bare"),
+        pytest.param("600519.SH", "sh", id="sh-suffix"),
+        pytest.param("SH600519", "sh", id="sh-prefix"),
+        pytest.param("688001", "sh", id="sh-科创板"),
+        pytest.param("000001", "sz", id="sz-bare"),
+        pytest.param("000001.SZ", "sz", id="sz-suffix"),
+        pytest.param("SZ000001", "sz", id="sz-prefix"),
+        pytest.param("300001", "sz", id="sz-创业板"),
+    ],
+)
+def test_get_sina_prefix_valid(symbol, expected):
+    assert get_sina_prefix(symbol) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "symbol",
+    [
+        pytest.param("AAPL", id="us-equity"),
+        pytest.param("12345", id="hk-5digit"),
+        pytest.param("", id="empty"),
+        pytest.param("830001", id="bj-8xx"),
+        pytest.param("666666", id="invalid-6digit"),
+    ],
+)
+def test_get_sina_prefix_rejects(symbol):
+    with pytest.raises(SymbolFormatError) as exc:
+        get_sina_prefix(symbol)
+    assert exc.value.vendor == "sina"
+    assert exc.value.symbol == symbol
 
 
 @pytest.mark.unit
