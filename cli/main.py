@@ -22,6 +22,7 @@ from rich.align import Align
 from rich.rule import Rule
 
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.graph.comparison_graph import ComparisonOrchestrator
 from tradingagents.graph.analyst_execution import (
     AnalystWallTimeTracker,
     build_analyst_execution_plan,
@@ -31,6 +32,8 @@ from tradingagents.graph.analyst_execution import (
 from tradingagents.default_config import DEFAULT_CONFIG
 from cli.models import AnalystType
 from cli.utils import *
+from cli.comparison_selections import get_comparison_selections
+from cli.comparison_display import display_comparison_report, save_comparison_report
 from cli.announcements import fetch_announcements, display_announcements
 from cli.stats_handler import StatsCallbackHandler
 
@@ -1365,6 +1368,132 @@ def analyze(
         n = clear_all_checkpoints(DEFAULT_CONFIG["data_cache_dir"])
         console.print(f"[yellow]Cleared {n} checkpoint(s).[/yellow]")
     run_analysis(checkpoint=checkpoint)
+
+
+@app.command()
+def compare(
+    max_workers: int = typer.Option(
+        3,
+        "--parallel",
+        help="Max parallel analyses (1-5).",
+    ),
+):
+    """Analyze multiple stocks (2-10) and produce ranked buy recommendation list.
+
+    Runs the full analyst pipeline for each stock in parallel, computes
+    data-driven ranking factors, then uses an LLM to synthesise a
+    comprehensive comparison report with themes and leader identification.
+    """
+    # 1. Interactive selections
+    selections = get_comparison_selections()
+
+    # 2. Build config
+    config = dict(DEFAULT_CONFIG)
+    provider = selections["llm_provider"]
+    config["llm_provider"] = provider.lower()
+
+    # Resolve backend URL for the selected provider
+    from cli.utils import ensure_api_key, provider_default_url
+    if provider.lower() == "custom":
+        custom_url = questionary.text(
+            "Enter your custom OpenAI-compatible endpoint URL:",
+            default="http://localhost:11434/v1",
+        ).ask()
+        config["backend_url"] = custom_url
+    else:
+        config["backend_url"] = provider_default_url(provider.lower())
+
+    # Ensure the provider's API key is configured
+    ensure_api_key(provider.lower())
+
+    # Select provider-specific models
+    console.print()
+    console.print("[bold]Model Selection[/bold]")
+    if selections["llm_provider"].lower() in ("custom", "openrouter", "azure"):
+        # For custom / openrouter / azure, the user provides the model ID via
+        # env vars (TRADINGAGENTS_QUICK_THINK_LLM / TRADINGAGENTS_DEEP_THINK_LLM)
+        # or falls back to config defaults.
+        console.print("[dim]Using default models (set TRADINGAGENTS_*_THINK_LLM env vars to override)[/dim]")
+    else:
+        selections["shallow_thinker"] = select_shallow_thinking_agent(provider)
+        selections["deep_thinker"] = select_deep_thinking_agent(provider)
+        config["quick_think_llm"] = selections["shallow_thinker"]
+        config["deep_think_llm"] = selections["deep_thinker"]
+
+    # Apply data preset to config["data_vendors"]
+    data_preset = selections.get("data_preset")
+    if data_preset == "china":
+        config["data_vendors"] = {
+            **config["data_vendors"],
+            "core_stock_apis": "akshare",
+            "fundamental_data": "akshare",
+            "news_data": "eastmoney",
+            "social_sentiment": "chinese",
+            "chinese_market_data": "akshare",
+        }
+    elif data_preset == "hk":
+        config["data_vendors"] = {
+            **config["data_vendors"],
+            "news_data": "sina_finance",
+            "social_sentiment": "all",
+        }
+    elif data_preset == "global":
+        config["data_vendors"] = {
+            **config["data_vendors"],
+            "news_data": "eastmoney",
+            "social_sentiment": "all",
+        }
+    # "custom" preset: keep default data vendors
+
+    # Map research depth (int 1/3/5) to debate rounds
+    research_depth = selections.get("research_depth", 1)
+    config["max_debate_rounds"] = research_depth
+    config["max_risk_discuss_rounds"] = research_depth
+
+    config["output_language"] = selections.get("language", "Chinese (中文)")
+
+    # 3. Create orchestrator
+    console.print("[yellow]Initializing comparison orchestrator...[/yellow]")
+    orchestrator = ComparisonOrchestrator(config=config)
+
+    # 4. Prepare progress display
+    tickers = selections["tickers"]
+    trade_date = selections["analysis_date"]
+    analysts = [a.value for a in selections["analysts"]]
+    workers = min(max_workers, selections.get("max_workers", 3))
+
+    console.print(f"\n[bold]Starting comparison of {len(tickers)} stocks...[/bold]")
+    console.print(f"  Date: {trade_date}")
+    console.print(f"  Analysts: {', '.join(analysts)}")
+    console.print(f"  Parallelism: {workers}")
+    console.print()
+
+    # 5. Run comparison
+    per_stock_data = {}
+    try:
+        report, per_stock_data = orchestrator.run_comparison(
+            tickers=tickers,
+            trade_date=trade_date,
+            selected_analysts=analysts,
+            max_workers=workers,
+        )
+    except Exception as exc:
+        console.print(f"\n[red]Comparison failed: {exc}[/red]")
+        raise typer.Exit(code=1)
+
+    # 6. Display results
+    display_comparison_report(report)
+
+    # 7. Save to disk
+    save_choice = questionary.confirm(
+        "Save report to disk?", default=True
+    ).ask()
+    if save_choice:
+        save_comparison_report(
+            report,
+            output_dir=config.get("results_dir", "reports"),
+            per_stock_results=per_stock_data,
+        )
 
 
 if __name__ == "__main__":

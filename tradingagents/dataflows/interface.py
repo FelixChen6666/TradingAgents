@@ -25,6 +25,9 @@ from . import china_macro_news  # noqa: F401
 from . import china_policy_news  # noqa: F401
 from . import china_global_market_news  # noqa: F401
 from . import china_market_flow  # noqa: F401
+from . import china_stock_ranking
+from . import chinese_news_guba        # noqa: F401 — A 股散户情绪 (东方财富股吧)
+from . import chinese_news_xueqiu      # noqa: F401 — A 股价值投资者情绪 (雪球)
 
 from .alpha_vantage_common import AlphaVantageRateLimitError
 from .config import get_config

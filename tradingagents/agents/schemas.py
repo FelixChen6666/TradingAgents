@@ -355,3 +355,283 @@ def render_sentiment_report(report: SentimentReport) -> str:
         "",
         report.narrative,
     ])
+
+
+# ---------------------------------------------------------------------------
+# Multi-Stock Comparison & Ranking
+# ---------------------------------------------------------------------------
+
+
+class MomentumFactors(BaseModel):
+    """Momentum-related factors for short-term ranking."""
+
+    return_12m: Optional[float] = Field(
+        default=None,
+        description="12-month price return excluding the most recent month",
+    )
+    return_5d: Optional[float] = Field(
+        default=None,
+        description="5-trading-day price return",
+    )
+    proximity_to_52w_high: Optional[float] = Field(
+        default=None,
+        description="Current price proximity to 52-week high, 0-1 scale",
+    )
+    rps_percentile: Optional[float] = Field(
+        default=None,
+        description="Relative Price Strength percentile vs full market, 0-100",
+    )
+
+
+class VolumeFactors(BaseModel):
+    """Volume and accumulation factors."""
+
+    relative_volume_ratio: Optional[float] = Field(
+        default=None,
+        description="Current volume / 20-day average volume",
+    )
+    chaikin_money_flow: Optional[float] = Field(
+        default=None,
+        description="20-day Chaikin Money Flow value, -1 to 1",
+    )
+    up_down_volume_ratio: Optional[float] = Field(
+        default=None,
+        description="Ratio of up-day volume to down-day volume over 10 days",
+    )
+
+
+class TechnicalFactors(BaseModel):
+    """Technical indicator signals."""
+
+    rsi_14: Optional[float] = Field(
+        default=None,
+        description="14-day RSI value, 0-100",
+    )
+    macd_signal: Optional[str] = Field(
+        default=None,
+        description="MACD signal direction: bullish_cross, bearish_cross, positive, negative",
+    )
+    bb_position: Optional[float] = Field(
+        default=None,
+        description="Price position within Bollinger Bands, 0 (lower) to 1 (upper)",
+    )
+    ma_alignment: Optional[str] = Field(
+        default=None,
+        description="Moving average alignment: bullish, bearish, mixed",
+    )
+
+
+class CapitalFlowFactors(BaseModel):
+    """Capital flow factors (A-share specific)."""
+
+    main_force_net_inflow_5d: Optional[float] = Field(
+        default=None,
+        description="Aggregated main force net capital inflow over 5 trading days",
+    )
+    northbound_change: Optional[float] = Field(
+        default=None,
+        description="Northbound (沪深港通) position change, if available",
+    )
+
+
+class StockRankingFactors(BaseModel):
+    """Aggregated ranking factors for a single stock."""
+
+    momentum: MomentumFactors = Field(
+        default_factory=MomentumFactors,
+        description="Momentum-related factors",
+    )
+    volume: VolumeFactors = Field(
+        default_factory=VolumeFactors,
+        description="Volume and accumulation factors",
+    )
+    technical: TechnicalFactors = Field(
+        default_factory=TechnicalFactors,
+        description="Technical indicator signals",
+    )
+    capital_flow: CapitalFlowFactors = Field(
+        default_factory=CapitalFlowFactors,
+        description="Capital flow factors",
+    )
+    short_term_score: Optional[float] = Field(
+        default=None,
+        description="Composite short-term score, 0-100",
+    )
+
+
+class ThemeTag(BaseModel):
+    """A single theme/concept tag identified for a stock."""
+
+    theme_name: str = Field(
+        description="Theme or concept name, e.g. '人工智能', '新能源', '券商'",
+    )
+    relevance: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Relevance score 0-1",
+    )
+    evidence: str = Field(
+        description="Evidence supporting why this stock belongs to this theme",
+    )
+
+
+class LeaderPerception(BaseModel):
+    """Perception of whether the stock is a sector leader (龙头)."""
+
+    is_leader: bool = Field(
+        description="Whether this stock is perceived as a sector leader",
+    )
+    sector: str = Field(
+        description="The sector or industry this stock operates in",
+    )
+    confidence: str = Field(
+        description="Confidence level: 高 / 中 / 低",
+    )
+    reasoning: str = Field(
+        description="Reasoning for leader perception judgment",
+    )
+
+
+class IndividualStockRanking(BaseModel):
+    """Ranked entry for a single stock in the comparison report."""
+
+    ticker: str = Field(
+        description="Stock ticker symbol",
+    )
+    company_name: str = Field(
+        description="Company name",
+    )
+    short_term_score: float = Field(
+        ge=0,
+        le=100,
+        description="Composite short-term score, 0-100",
+    )
+    pm_rating: str = Field(
+        description="Portfolio Manager rating: Buy/Overweight/Hold/Underweight/Sell",
+    )
+    themes: list[ThemeTag] = Field(
+        description="Identified theme/concept tags for this stock",
+    )
+    leader_perception: LeaderPerception = Field(
+        description="Leader stock perception",
+    )
+    report_summary: str = Field(
+        description="Concise summary of the full analyst report, ~300 chars",
+    )
+
+
+class ComparisonReport(BaseModel):
+    """Top-level output for the multi-stock comparison and ranking feature."""
+
+    generated_at: str = Field(
+        description="Timestamp when the report was generated",
+    )
+    analysis_date: str = Field(
+        description="The analysis date in YYYY-MM-DD format",
+    )
+    total_stocks: int = Field(
+        description="Number of stocks analyzed",
+    )
+    ranked_stocks: list[IndividualStockRanking] = Field(
+        description="Stocks ranked by short_term_score in descending order",
+    )
+    market_context: str = Field(
+        description="Brief description of the A-share market context on analysis date",
+    )
+    key_themes: list[str] = Field(
+        description="Top 3-5 most important themes identified across all stocks",
+    )
+
+
+def render_comparison_report(report: ComparisonReport) -> str:
+    """Render a ComparisonReport to markdown for display and saving."""
+    lines = [
+        "# Multi-Stock Comparison Report",
+        "",
+        f"**Generated at**: {report.generated_at}",
+        f"**Analysis Date**: {report.analysis_date}",
+        f"**Total Stocks**: {report.total_stocks}",
+        "",
+        "---",
+        "",
+        "## Market Context",
+        "",
+        report.market_context,
+        "",
+        "---",
+        "",
+        "## Ranking Table",
+        "",
+        "| Rank | Ticker | Company | Short-Term Score | PM Rating | Themes | Leader |",
+        "|------|--------|---------|-----------------|-----------|--------|--------|",
+    ]
+    for i, stock in enumerate(report.ranked_stocks, 1):
+        theme_str = ", ".join(t.theme_name for t in stock.themes[:3])
+        leader_str = "✓" if stock.leader_perception.is_leader else "✗"
+        lines.append(
+            f"| {i} | {stock.ticker} | {stock.company_name} | "
+            f"{stock.short_term_score:.1f}/100 | {stock.pm_rating} | "
+            f"{theme_str} | {leader_str} |"
+        )
+
+    lines.extend([
+        "",
+        "---",
+        "",
+        "## Key Themes",
+        "",
+    ])
+    for theme in report.key_themes:
+        lines.append(f"- **{theme}**")
+
+    lines.extend([
+        "",
+        "---",
+        "",
+        "## Detailed Stock Analysis",
+        "",
+    ])
+    for i, stock in enumerate(report.ranked_stocks, 1):
+        lines.extend([
+            f"### {i}. {stock.ticker} — {stock.company_name}",
+            "",
+            f"**Short-Term Score**: {stock.short_term_score:.1f}/100",
+            f"**PM Rating**: {stock.pm_rating}",
+            "",
+            "**Themes:**",
+        ])
+        for theme in stock.themes:
+            lines.append(f"- {theme.theme_name} (relevance: {theme.relevance:.2f}) — {theme.evidence}")
+        lines.extend([
+            "",
+            f"**Leader Perception**: {'Yes' if stock.leader_perception.is_leader else 'No'} "
+            f"(confidence: {stock.leader_perception.confidence})",
+            f"**Sector**: {stock.leader_perception.sector}",
+            f"**Reasoning**: {stock.leader_perception.reasoning}",
+            "",
+            "**Report Summary:**",
+            "",
+            stock.report_summary,
+            "",
+            "---",
+            "",
+        ])
+
+    return "\n".join(lines)
+
+
+def render_ranking_table(stocks: list[IndividualStockRanking]) -> str:
+    """Render just the ranking table portion for quick display."""
+    lines = [
+        "| Rank | Ticker | Company | Score | PM Rating | Top Theme | Leader |",
+        "|------|--------|---------|-------|-----------|-----------|--------|",
+    ]
+    for i, stock in enumerate(stocks, 1):
+        top_theme = stock.themes[0].theme_name if stock.themes else "-"
+        leader_str = "✓" if stock.leader_perception.is_leader else "✗"
+        lines.append(
+            f"| {i} | {stock.ticker} | {stock.company_name} | "
+            f"{stock.short_term_score:.1f} | {stock.pm_rating} | "
+            f"{top_theme} | {leader_str} |"
+        )
+    return "\n".join(lines)

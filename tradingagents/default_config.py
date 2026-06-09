@@ -108,7 +108,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance, akshare
         "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance, akshare
         "news_data": "eastmoney,sina_finance,yfinance",  # Options: yfinance, alpha_vantage, eastmoney, sina_finance
-        "social_sentiment": "all",           # Options: stocktwits, reddit, all, chinese, baidu_vote, em_comment (no key needed)
+        "social_sentiment": "all",           # Options: stocktwits, reddit, all, chinese, em_detail_scores, em_comment (no key needed)
         "chinese_market_data": "akshare",    # China A-share / HK data (no key needed)
         "macroeconomic_data": "fred",        # US macro indicators (free API key)
         "china_macro_news": "akshare+eastmoney",

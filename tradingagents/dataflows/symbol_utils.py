@@ -210,3 +210,165 @@ def strip_exchange_suffix(symbol: str) -> str:
         if s.endswith(suffix):
             return s[: -len(suffix)]
     return s
+
+
+# ---------------------------------------------------------------------------
+# Vendor-format conversion helpers (DRY: used by eastmoney, sina, akshare, ...)
+# ---------------------------------------------------------------------------
+
+# A-share market groups: Shanghai returns 1./sh, Shenzhen returns 0./sz.
+# This mirrors the existing _SH_SE_CODES / _SZ_SE_CODES detection in
+# detect_market() but is exposed as a set for direct prefix matching by
+# the vendor-specific formatters below.
+_SHANGHAI_CODE_PREFIXES = ("6", "9", "68")
+
+
+def get_pure_code(symbol: str) -> str:
+    """Strip exchange suffix and return the pure uppercase code.
+
+    Thin wrapper around :func:`strip_exchange_suffix` for use by vendor
+    modules that want a single canonical helper.  Accepts inputs like
+    ``"600519"``, ``"600519.SH"``, ``"sh600519"`` (prefix form is *not*
+    handled here — see :func:`strip_prefix_market` for that).
+
+    Returns:
+        The upper-cased, suffix-stripped code.
+    """
+    return strip_exchange_suffix(symbol).upper()
+
+
+def is_shanghai_a_share(symbol: str) -> bool:
+    """True if *symbol* is a Shanghai-listed A-share (incl. 科创板 / B股)."""
+    code = get_pure_code(symbol)
+    if not code.isdigit() or len(code) != 6:
+        return False
+    return code.startswith(_SHANGHAI_CODE_PREFIXES)
+
+
+def is_shenzhen_a_share(symbol: str) -> bool:
+    """True if *symbol* is a Shenzhen-listed A-share (incl. 创业板 / B股)."""
+    code = get_pure_code(symbol)
+    if not code.isdigit() or len(code) != 6:
+        return False
+    # After Shanghai check, any 6-digit A-share that isn't Shanghai is
+    # Shenzhen.  detect_market() already proved it's a_share.
+    return is_a_share(symbol) and not is_shanghai_a_share(symbol)
+
+
+def get_eastmoney_secid(symbol: str) -> str:
+    """Convert a stock symbol to East Money's ``secid`` format.
+
+    East Money expects ``1.<code>`` for Shanghai-listed securities and
+    ``0.<code>`` for Shenzhen-listed ones, where the first digit encodes
+    the exchange (1 = Shanghai, 0 = Shenzhen).
+
+    Args:
+        symbol: A-share code, with or without an exchange suffix
+            (e.g. ``"600519"``, ``"000001.SZ"``).
+
+    Returns:
+        The secid string (e.g. ``"1.600519"`` or ``"0.000001"``).
+
+    Raises:
+        ValueError: When *symbol* is not a 6-digit A-share code.
+    """
+    code = get_pure_code(symbol)
+    if not code.isdigit() or len(code) != 6:
+        raise ValueError(
+            f"Invalid A-share code for East Money secid: {symbol!r}"
+        )
+    prefix = "1" if is_shanghai_a_share(code) else "0"
+    return f"{prefix}.{code}"
+
+
+def get_sina_prefix(symbol: str) -> str:
+    """Return Sina Finance's exchange prefix for *symbol*.
+
+    Sina uses ``sh`` for Shanghai and ``sz`` for Shenzhen (e.g. URLs of
+    the form ``finance.sina.com.cn/realstock/company/sh600519/nc.shtml``).
+
+    Args:
+        symbol: A-share code, with or without an exchange suffix.
+
+    Returns:
+        The exchange prefix (``"sh"`` or ``"sz"``).
+
+    Raises:
+        ValueError: When *symbol* is not a 6-digit A-share code.
+    """
+    code = get_pure_code(symbol)
+    if not code.isdigit() or len(code) != 6:
+        raise ValueError(
+            f"Invalid A-share code for Sina prefix: {symbol!r}"
+        )
+    return "sh" if is_shanghai_a_share(code) else "sz"
+
+
+def get_akshare_market(symbol: str) -> str:
+    """Determine the AKShare market flavour for *symbol*.
+
+    AKShare routes A-share and HK stock queries to different APIs, so
+    callers need a quick classifier.  This helper also accepts
+    HK-style inputs (5-digit code or ``.HK`` suffix) that the broader
+    :func:`detect_market` supports.
+
+    Args:
+        symbol: Stock code, with or without an exchange suffix.
+
+    Returns:
+        One of ``"a_share"``, ``"hk"``, or ``"unsupported"``.
+    """
+    s = (symbol or "").strip().upper()
+    if not s:
+        return "unsupported"
+
+    # Hong Kong: 5-digit numeric or .HK suffix.
+    if s.endswith(".HK") or (s.isdigit() and len(s) == 5):
+        return "hk"
+
+    if is_a_share(symbol):
+        return "a_share"
+
+    return "unsupported"
+
+
+def strip_prefix_market(symbol: str) -> str:
+    """Strip a leading exchange prefix (``SH``/``SZ``/``BJ``/``SS``) from *symbol*.
+
+    Chinese retail-trader inputs sometimes use prefix form
+    (``SH600519``) rather than suffix form (``600519.SH``).  This helper
+    handles the prefix form; combine with :func:`strip_exchange_suffix`
+    to accept both.
+
+    Args:
+        symbol: Stock code, possibly with a leading exchange prefix.
+
+    Returns:
+        The code with any leading ``SH``/``SZ``/``BJ``/``SS`` removed
+        (uppercased).  Returns *symbol* unchanged if no prefix matches.
+    """
+    s = symbol.strip().upper()
+    for prefix in ("SH", "SZ", "BJ", "SS"):
+        if (
+            s.startswith(prefix)
+            and len(s) > len(prefix)
+            and s[len(prefix)].isdigit()
+        ):
+            return s[len(prefix):]
+    return s
+
+
+def to_a_share_code(symbol: str) -> str:
+    """Return a normalised 6-digit A-share code from any input form.
+
+    Accepts inputs in either prefix form (``SH600519``) or suffix form
+    (``600519.SH``), with or without leading/trailing whitespace, and
+    returns the bare 6-digit code (``600519``).  Falls through to
+    :func:`strip_exchange_suffix` if no prefix matches.
+
+    This is the canonical "give me the code" helper — vendor modules
+    that need a 6-digit code should call this rather than chaining
+    :func:`strip_prefix_market` and :func:`strip_exchange_suffix`
+    manually.
+    """
+    return strip_exchange_suffix(strip_prefix_market(symbol))

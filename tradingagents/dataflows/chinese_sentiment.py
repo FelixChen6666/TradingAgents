@@ -1,17 +1,22 @@
-"""Chinese A-share social sentiment via AKShare — Baidu vote + East Money 千股千评.
+"""Chinese A-share social sentiment via AKShare — East Money 千股千评.
 
 No API key required (AKShare wraps public APIs).  Three complementary views:
 
-  1. **Baidu stock vote** (百度股评投票) — bullish/bearish ratio per period,
-     directly analogous to the Bullish/Bearish labels on StockTwits.
-  2. **East Money 千股千评** — comprehensive scoring (综合得分, 机构参与度,
+  1. **East Money 千股千评** — comprehensive scoring (综合得分, 机构参与度,
      关注指数) for a stock.
+  2. **East Money detail scores** — historical score trend (历史评分) and
+     institutional participation (机构参与度) time series.
   3. **Aggregate** (``"chinese"``) — combines all available sources into a
      single report block.
 
 Each function follows the same graceful-degradation contract as StockTwits
 and Reddit: returns a formatted string or a ``<placeholder>`` rather than
 raising, so the calling sentiment analyst never has to handle exceptions.
+
+NOTE: The former Baidu stock vote (百度股评投票) source has been replaced
+because the upstream Baidu API no longer returns data.  The replacement
+uses East Money historical score and institutional participation data which
+provides richer and more reliable sentiment signals.
 """
 
 from __future__ import annotations
@@ -22,7 +27,7 @@ from datetime import datetime
 from .placeholders import no_data_found, source_unavailable
 from .rate_limiter import get_rate_limiter
 from .registry import register_vendor
-from .symbol_utils import strip_exchange_suffix
+from .symbol_utils import get_pure_code, is_a_share
 
 logger = logging.getLogger(__name__)
 
@@ -39,63 +44,62 @@ else:
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# 1. East Money detail scores — 历史评分 + 机构参与度
 # ---------------------------------------------------------------------------
 
-def _to_code(symbol: str) -> str:
-    """Strip exchange suffix and return the pure A-share numeric code."""
-    return strip_exchange_suffix(symbol.upper())
-
-
-def _is_a_share(symbol: str) -> bool:
-    """Rough check: starts with 6, 0, 3 (after stripping suffix)."""
-    code = _to_code(symbol)
-    return code.isdigit() and len(code) == 6
-
-
-# ---------------------------------------------------------------------------
-# 1. Baidu stock vote  —  百度股评投票 (bullish/bearish ratio)
-# ---------------------------------------------------------------------------
-
-def get_baidu_vote(
+def get_em_detail_scores(
     ticker: str,
     start_date: str = "",
     end_date: str = "",
     limit: int = 30,
 ) -> str:
-    """Fetch bullish/bearish voting data from Baidu stock review.
+    """Fetch historical score trend and institutional participation from East Money.
 
-    ``stock_zh_vote_baidu`` returns vote counts and ratios per period
-    (day/week/month/year) — directly analogous to StockTwits sentiment tags.
+    Uses ``stock_comment_detail_zhpj_lspf_em`` (历史评分) and
+    ``stock_comment_detail_zlkp_jgcyd_em`` (机构参与度) to provide
+    time-series sentiment signals — more reliable than the deprecated
+    Baidu vote API.
     """
     if not _AKSHARE_AVAILABLE:
         return "<akshare not available: install with 'pip install akshare'>"
-    if not _is_a_share(ticker):
-        return f"<baidu vote not applicable for non-A-share ticker: {ticker}>"
+    if not is_a_share(ticker):
+        return f"<em detail scores not applicable for non-A-share ticker: {ticker}>"
 
-    code = _to_code(ticker)
+    code = get_pure_code(ticker)
     _rate_limiter.wait_if_needed("chinese_sentiment")
 
+    blocks: list[str] = [f"## East Money Detail Scores — {ticker}", ""]
+
+    # -- Historical score trend --
     try:
-        from akshare.stock_feature.stock_zh_vote_baidu import stock_zh_vote_baidu
-        df = stock_zh_vote_baidu(symbol=code, indicator="股票")
+        df = ak.stock_comment_detail_zhpj_lspf_em(symbol=code)
+        if df is not None and not df.empty:
+            blocks.append("**历史评分 (Historical Score — recent 5):**")
+            for _, row in df.head(5).iterrows():
+                date = row.get("交易日", row.get("交易日期", ""))
+                score = row.get("评分", "")
+                blocks.append(f"  {date}: Score={score}")
+            blocks.append("")
     except Exception as exc:
-        logger.debug("Baidu vote failed for %s: %s", ticker, exc)
-        return source_unavailable("baidu_vote", str(exc))
+        logger.debug("Historical score failed for %s: %s", ticker, exc)
 
-    if df is None or df.empty:
-        return no_data_found("baidu_vote", ticker, "vote data")
+    # -- Institutional participation --
+    try:
+        df = ak.stock_comment_detail_zlkp_jgcyd_em(symbol=code)
+        if df is not None and not df.empty:
+            blocks.append("**机构参与度 (Institutional Participation — recent 5):**")
+            for _, row in df.head(5).iterrows():
+                date = row.get("交易日", row.get("交易日期", ""))
+                val = row.get("机构参与度", "")
+                blocks.append(f"  {date}: Participation={val}")
+            blocks.append("")
+    except Exception as exc:
+        logger.debug("Institutional participation failed for %s: %s", ticker, exc)
 
-    lines = [f"## Baidu Stock Vote — {ticker}", ""]
-    for _, row in df.iterrows():
-        period = row.get("周期", "")
-        bullish = row.get("看涨", 0)
-        bearish = row.get("看跌", 0)
-        bull_pct = row.get("看涨比例", "")
-        bear_pct = row.get("看跌比例", "")
-        lines.append(f"  {period}: Bullish {bullish} ({bull_pct}) / Bearish {bearish} ({bear_pct})")
+    if len(blocks) == 2:
+        return no_data_found("em_detail_scores", ticker, "score data")
 
-    return "\n".join(lines)
+    return "\n".join(blocks)
 
 
 # ---------------------------------------------------------------------------
@@ -115,19 +119,17 @@ def get_em_comment(
     """
     if not _AKSHARE_AVAILABLE:
         return "<akshare not available: install with 'pip install akshare'>"
-    if not _is_a_share(ticker):
+    if not is_a_share(ticker):
         return f"<em_comment not applicable for non-A-share ticker: {ticker}>"
 
-    code = _to_code(ticker)
+    code = get_pure_code(ticker)
     _rate_limiter.wait_if_needed("chinese_sentiment")
 
     try:
-        from akshare.stock_feature.stock_comment_em import (
-            stock_comment_em,
-            stock_comment_detail_scrd_focus_em,
-            stock_comment_detail_scrd_desire_em,
-        )
-    except Exception as exc:
+        stock_comment_em = ak.stock_comment_em
+        stock_comment_detail_scrd_focus_em = ak.stock_comment_detail_scrd_focus_em
+        stock_comment_detail_scrd_desire_em = ak.stock_comment_detail_scrd_desire_em
+    except AttributeError as exc:
         return source_unavailable("em_comment", str(exc))
 
     blocks: list[str] = [f"## East Money 千股千评 — {ticker}", ""]
@@ -153,8 +155,8 @@ def get_em_comment(
         if focus is not None and not focus.empty:
             blocks.append("**关注指数 (Attention Index — recent 5):**")
             for _, row in focus.head(5).iterrows():
-                date = row.get("交易日期", "")
-                val = row.get("关注指数", "")
+                date = row.get("交易日", row.get("交易日期", ""))
+                val = row.get("用户关注指数", row.get("关注指数", ""))
                 blocks.append(f"  {date}: {val}")
             blocks.append("")
     except Exception as exc:
@@ -191,18 +193,18 @@ def get_chinese_sentiment_aggregate(
     limit: int = 30,
 ) -> str:
     """Aggregate all Chinese sentiment sources for *ticker*."""
-    if not _is_a_share(ticker):
+    if not is_a_share(ticker):
         return f"<chinese sentiment sources not applicable for {ticker}>"
 
     parts = [
         f"# Chinese Social Sentiment for {ticker}\n",
     ]
 
-    baidu = get_baidu_vote(ticker, start_date, end_date, limit)
-    if not baidu.startswith("<") and "no_data" not in baidu.lower():
-        parts.append(baidu)
+    detail = get_em_detail_scores(ticker, start_date, end_date, limit)
+    if not detail.startswith("<") and "no_data" not in detail.lower():
+        parts.append(detail)
     else:
-        parts.append(f"  (Baidu vote: {baidu})")
+        parts.append(f"  (EM detail scores: {detail})")
 
     em = get_em_comment(ticker, start_date, end_date, limit)
     if not em.startswith("<") and "no_data" not in em.lower():
@@ -232,7 +234,7 @@ def get_chinese_sentiment_placeholder(
 # ---------------------------------------------------------------------------
 
 register_vendor(
-    "get_social_sentiment", "baidu_vote", get_baidu_vote,
+    "get_social_sentiment", "em_detail_scores", get_em_detail_scores,
 )
 register_vendor(
     "get_social_sentiment", "em_comment", get_em_comment,

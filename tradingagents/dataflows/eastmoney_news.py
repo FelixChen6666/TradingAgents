@@ -25,7 +25,11 @@ import requests
 from .config import get_config
 from .rate_limiter import get_rate_limiter
 from .registry import register_vendor
-from .symbol_utils import is_a_share, NoMarketDataError, strip_exchange_suffix
+from .symbol_utils import (
+    get_eastmoney_secid,
+    is_a_share,
+    NoMarketDataError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,17 +45,6 @@ _HEADERS = {
     "Referer": "https://www.eastmoney.com/",
     "Accept": "application/json, text/plain, */*",
 }
-
-
-def _detect_secid(symbol: str) -> str:
-    """Map a symbol to its East Money secid.
-
-    1.xxx = Shanghai (6xx, 9xx, 688科创); 0.xxx = Shenzhen (0xx, 2xx, 3xx).
-    """
-    raw = strip_exchange_suffix(symbol)
-    if raw.startswith(("6", "9", "68")):
-        return f"1.{raw}"
-    return f"0.{raw}"
 
 
 def _strip_jsonp(text: str) -> str:
@@ -109,7 +102,7 @@ def get_news_eastmoney(
             detail="eastmoney only covers A-share stocks",
         )
 
-    secid = _detect_secid(symbol)
+    secid = get_eastmoney_secid(symbol)
     url = "https://push2.eastmoney.com/api/qt/stock_news_em/get"
     params = {
         "secid": secid,

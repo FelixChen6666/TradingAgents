@@ -24,7 +24,12 @@ from bs4 import BeautifulSoup
 from .config import get_config
 from .rate_limiter import get_rate_limiter
 from .registry import register_vendor
-from .symbol_utils import is_a_share, NoMarketDataError, strip_exchange_suffix
+from .symbol_utils import (
+    get_pure_code,
+    get_sina_prefix,
+    is_a_share,
+    NoMarketDataError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +52,6 @@ _CATEGORIES = {
     "industry": "56958",
     "stock": "56959",
 }
-
-
-def _exchange_prefix(symbol: str) -> str:
-    """Return the Sina exchange prefix: ``sh`` for Shanghai, ``sz`` for Shenzhen."""
-    raw = strip_exchange_suffix(symbol)
-    if raw.startswith(("6", "9", "68")):
-        return "sh"
-    return "sz"
 
 
 # ---------------------------------------------------------------------------
@@ -87,8 +84,8 @@ def get_news_sina(
             detail="sina_finance only covers A-share stocks",
         )
 
-    code = strip_exchange_suffix(symbol)
-    prefix = _exchange_prefix(symbol)
+    code = get_pure_code(symbol)
+    prefix = get_sina_prefix(symbol)
     url = (
         f"https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllNewsStock/"
         f"symbol/{prefix}{code}.phtml"

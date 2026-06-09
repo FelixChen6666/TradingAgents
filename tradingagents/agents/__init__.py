@@ -18,6 +18,7 @@ from .risk_mgmt.neutral_debator import create_neutral_debator
 
 from .managers.research_manager import create_research_manager
 from .managers.portfolio_manager import create_portfolio_manager
+from .managers.comparison_manager import create_comparison_manager
 
 from .trader.trader import create_trader
 
@@ -39,4 +40,5 @@ __all__ = [
     "create_sentiment_analyst",
     "create_social_media_analyst",  # deprecated; will be removed in a future version
     "create_trader",
+    "create_comparison_manager",
 ]

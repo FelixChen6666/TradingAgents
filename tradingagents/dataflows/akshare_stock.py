@@ -40,26 +40,6 @@ else:
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _to_akshare_code(symbol: str) -> str:
-    """Strip exchange suffix from an A-share / HK symbol for AKShare."""
-    code = strip_exchange_suffix(symbol)
-    return code
-
-
-def _detect_akshare_market(symbol: str) -> str:
-    """Return the AKShare market flavour for *symbol*."""
-    raw = symbol.strip().upper()
-    if raw.endswith(".HK") or (raw.isdigit() and len(raw) == 5):
-        return "hk"
-    if detect_market(symbol) == "a_share":
-        return "a_share"
-    return "unsupported"
-
-
-# ---------------------------------------------------------------------------
 # OHLCV — A-share daily data
 # ---------------------------------------------------------------------------
 
@@ -72,7 +52,7 @@ def get_stock_data_akshare(
     if not _AKSHARE_AVAILABLE:
         return "<akshare not available: install with 'pip install akshare'>"
 
-    market = _detect_akshare_market(symbol)
+    market = get_akshare_market(symbol)
     if market == "unsupported":
         raise NoMarketDataError(
             symbol, symbol,
@@ -80,7 +60,7 @@ def get_stock_data_akshare(
         )
 
     _rate_limiter.wait_if_needed("akshare")
-    code = _to_akshare_code(symbol)
+    code = get_pure_code(symbol)
     try:
         if market == "a_share":
             df = ak.stock_zh_a_hist(
@@ -149,12 +129,12 @@ def get_fundamentals_akshare(symbol: str) -> str:
     if not _AKSHARE_AVAILABLE:
         return "<akshare not available>"
 
-    market = _detect_akshare_market(symbol)
+    market = get_akshare_market(symbol)
     if market != "a_share":
         return no_data_found("akshare", symbol, "fundamentals")
 
     _rate_limiter.wait_if_needed("akshare")
-    code = _to_akshare_code(symbol)
+    code = get_pure_code(symbol)
     try:
         df = ak.stock_financial_abstract(symbol=code)
     except Exception as exc:
